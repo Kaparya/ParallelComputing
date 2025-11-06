@@ -5,7 +5,6 @@ import pandas as pd
 import subprocess
 import time
 
-check_number = 1000000000
 
 def parse_args():
     parser = argparse.ArgumentParser(description="Run an MPI program multiple times.")
@@ -18,10 +17,19 @@ def parse_args():
     return parser.parse_args()
 
 
-def draw_graphs(output):
-    threads_all = [1, 3, 5, 7, 10]
-    df = pd.read_csv(output)
+def build(args):
+    executable_filename = args.filename[: args.filename.rfind(".")]
+    subprocess.run(
+        ["mpicc", args.filename, "-o", executable_filename],
+        capture_output=True,
+        text=True,
+    )
+    return executable_filename
 
+
+def draw_graphs(output, threads_all):
+    df = pd.read_csv(output)
+  
     df_merged = pd.merge(
         df.copy(),
         df[df["threads"] == 1][["points_number", "time"]],
@@ -40,7 +48,7 @@ def draw_graphs(output):
     for threads in threads_all:
         label = f"{threads} процесса"
         if threads == 1:
-            label = "Последовательная"
+            label = "Последовательный"
         elif threads == 3:
             label = "3 процесса"
         else:
@@ -73,21 +81,80 @@ def draw_graphs(output):
     axes[2].set_xscale("log")
     axes[2].grid(True)
 
+    check_number = 1000000000
     cur_df = df_merged[df_merged['points_number'] == check_number]
     axes[3].plot(cur_df["threads"], cur_df["speedup"], "o-", label=label)
-    axes[3].set_title("Ускорения от количества процессов")
+    axes[3].set_title(f"Ускорения от количества процессов (на {check_number} точках)")
     axes[3].set_xlabel("Количество процессов")
     axes[3].set_ylabel("Ускорение")
     axes[3].grid(True)
 
     axes[4].plot(cur_df["threads"], cur_df["efficiency"], "o-", label=label)
-    axes[4].set_title("Эффективности от количества процессов")
+    axes[4].set_title(f"Эффективности от количества процессов (на {check_number} точках)")
     axes[4].set_xlabel("Количество процессов")
     axes[4].set_ylabel("Эффективность")
     axes[4].grid(True)
 
     plt.tight_layout()
     fig.delaxes(axes[-1])
+    output_file = output[:output.find('.')] + "_graph.png"
+    plt.savefig(output_file, dpi=300)
+
+def draw_graphs_second(output, threads_all):
+    df = pd.read_csv(output)
+    df['size'] = df['row_size'] * df['column_size']
+
+    df_merged = pd.merge(
+        df.copy(),
+        df[df["threads"] == 1][["row_size", "column_size", "time"]],
+        on=("row_size", "column_size"),
+        suffixes=("_parallel", "_serial")
+    )
+
+    df_merged["speedup"] = df_merged["time_serial"] / df_merged["time_parallel"]
+    df_merged["efficiency"] = df_merged["speedup"] / df_merged["threads"]
+    print(df_merged)
+
+    fig, axes = plt.subplots(1, 3, figsize=(30, 10))
+    axes = axes.flatten()
+    fig.suptitle("Задание 2 (Умножение матрицы на вектор)", fontsize=14)
+
+    for threads in threads_all:
+        label = f"{threads} процесса"
+        if threads == 1:
+            label = "Последовательный"
+        elif threads in (2, 3, 4):
+            label = f"{threads} процесса"
+        else:
+            label = f"{threads} процессов"
+
+        cur_df = df_merged[df_merged['threads'] == threads].sort_values('size')
+        axes[0].plot(cur_df["size"], cur_df["time_parallel"], "o-", label=label)
+    
+    axes[0].set_title("Сравнение по времени работы")
+    axes[0].set_xlabel("Всего элементов в матрице (row_size * column_size)")
+    axes[0].set_ylabel("Время, с")
+    axes[0].legend()
+    axes[0].set_xscale("log")
+    axes[0].grid(True)
+
+    check_number = 100000000
+    cur_df = df_merged[df_merged['size'] == check_number]
+    axes[1].plot(cur_df["threads"], cur_df["speedup"], "o-", label='По строкам')
+    axes[1].set_title("Ускорения от количества процессов (1000x100000)")
+    axes[1].set_xlabel("Количество процессов")
+    axes[1].set_ylabel("Ускорение")
+    # axes[1].legend()
+    axes[1].grid(True)
+
+    axes[2].plot(cur_df["threads"], cur_df["efficiency"], "o-", label='По строкам')
+    axes[2].set_title("Эффективности от количества процессов")
+    axes[2].set_xlabel("Количество процессов")
+    axes[2].set_ylabel("Эффективность")
+    # axes[2].legend()
+    axes[2].grid(True)
+
+    plt.tight_layout()
     output_file = output[:output.find('.')] + "_graph.png"
     plt.savefig(output_file, dpi=300)
 
@@ -169,7 +236,6 @@ def draw_graphs_third(output):
     plt.savefig(output.replace(".csv", "_third_graphs.png"), dpi=300)
     plt.show()
 
-
 def first_task(args):
     threads_all = [1, 3, 5, 7, 10]
     points_numbers = [
@@ -183,13 +249,9 @@ def first_task(args):
         300000000,
         1000000000
     ]
-    # Build
-    executable_filename = args.filename[: args.filename.rfind(".")]
-    subprocess.run(
-        ["mpicc", args.filename, "-o", executable_filename],
-        capture_output=True,
-        text=True,
-    )
+    threads_all = [1, 3, 5, 7, 10]
+
+    executable_filename = build(args)
 
     with open(args.output, "w") as f:
         print("threads,pi,points_number,time", file=f)
@@ -198,7 +260,7 @@ def first_task(args):
             for points_number in points_numbers:
                 cur_string = ""
                 times_sum = 0.0
-                for i in range(args.retries):
+                for _ in range(args.retries):
                     # Execute + measure time
                     result = subprocess.run(
                         [
@@ -222,7 +284,50 @@ def first_task(args):
                 cur_string = f"{threads},{cur_string},{str(times_sum / args.retries)}"
                 print("final: ", cur_string)
                 print(cur_string, file=f)
-    draw_graphs(args.output)
+    draw_graphs(args.output, threads_all)
+
+
+def second_task(args):
+    row_sizes = [10, 100, 1000]
+    column_sizes = [10, 100000]
+    threads_all = [1, 2, 3, 4, 8]
+    
+    executable_filename = build(args)
+    
+    with open(args.output, "w") as f:
+        print("threads,total_sum,row_size,column_size,time", file=f)
+
+        for threads in threads_all:
+            for row_size in row_sizes:
+                for column_size in column_sizes:
+                    cur_string = ""
+                    times_sum = 0.0
+                    for _ in range(args.retries):
+                        # Execute + measure time
+                        result = subprocess.run(
+                            [
+                                "mpiexec",
+                                "-n",
+                                str(threads),
+                                executable_filename,
+                                str(row_size),
+                                str(column_size)
+                            ],
+                            capture_output=True,
+                            text=True,
+                        )
+                        stdout = result.stdout
+                        time_string = stdout[stdout.find("|") + 1 : stdout.rfind("|")]
+                        print(time_string)
+                        cur_string = time_string[: time_string.rfind(",")]
+                        times_sum += float(time_string.split(",")[-1])
+
+                        time.sleep(0.1)
+
+                    cur_string = f"{threads},{cur_string},{str(times_sum / args.retries)}"
+                    print("final: ", cur_string)
+                    print(cur_string, file=f)
+    draw_graphs_second(args.output, threads_all)
 
 def third_task(args):
     threads_all = [1, 4]
@@ -275,11 +380,15 @@ def third_task(args):
     draw_graphs_third(args.output)
 
 
-
 def main():
     args = parse_args()
 
-    third_task(args)
+    if "first" in args.filename:
+        first_task(args)
+    elif "second" in args.filename:
+        second_task(args)
+    elif "third" in args.filename:
+        third_task(args)
 
 
 if __name__ == "__main__":
