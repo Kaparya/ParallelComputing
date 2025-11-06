@@ -10,12 +10,12 @@
 
 Сам python скрипт: [measure_time.py](measure_time.py). 
 
-Пример запуска:
+**Пример запуска:**
 ```
 python3 measure_time.py --filename first.c --output first.csv
 ```
 
-Параметры:
+**Параметры:**
 - `--filename` - Path to code file (e.g., first.c) to run (required)
 - `--retries` - Number of retries (default: 10)
 - `--output` - File for stats (default: stats.csv)
