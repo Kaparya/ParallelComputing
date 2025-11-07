@@ -124,6 +124,8 @@ def draw_graphs_second(output):
 
     for threads in threads_all:
         label = f"{threads} процесса"
+        if threads not in (1, 5, 10):
+            continue
         if threads == 1:
             label = "Последовательный"
         elif threads in (2, 3, 4):
@@ -134,8 +136,10 @@ def draw_graphs_second(output):
         cur_df = df_merged[df_merged['threads'] == threads].sort_values('size')
         rows = cur_df[cur_df['algorithm'] == 'rows']
         columns = cur_df[cur_df['algorithm'] == 'columns']
+        blocks = cur_df[cur_df['algorithm'] == 'blocks']
         axes[0].plot(rows["size"], rows["time_parallel"], "o--", label=label + '(Строки)')
         axes[0].plot(columns["size"], columns["time_parallel"], "o-", label=label + '(Столбцы)')
+        axes[0].plot(blocks["size"], blocks["time_parallel"], "o:", label=label + '(Блоки)')
     
     axes[0].set_title("Сравнение по времени работы")
     axes[0].set_xlabel("Всего элементов в матрице (row_size * column_size)")
@@ -148,9 +152,11 @@ def draw_graphs_second(output):
     cur_df = df_merged[df_merged['size'] == check_number]
     rows = cur_df[cur_df['algorithm'] == 'rows']
     columns = cur_df[cur_df['algorithm'] == 'columns']
+    blocks = cur_df[cur_df['algorithm'] == 'blocks']
 
     axes[1].plot(rows["threads"], rows["speedup"], "o--", label='Строки')
     axes[1].plot(columns["threads"], columns["speedup"], "o-", label='Столбцы')
+    axes[1].plot(blocks["threads"], blocks["speedup"], "o:", label='Блоки')
     axes[1].set_title("Ускорения от количества процессов (1000x100000)")
     axes[1].set_xlabel("Количество процессов")
     axes[1].set_ylabel("Ускорение")
@@ -159,6 +165,7 @@ def draw_graphs_second(output):
 
     axes[2].plot(rows["threads"], rows["efficiency"], "o--", label='Строки')
     axes[2].plot(columns["threads"], columns["efficiency"], "o-", label='Столбцы')
+    axes[2].plot(blocks["threads"], blocks["efficiency"], "o:", label='Блоки')
     axes[2].set_title("Эффективности от количества процессов")
     axes[2].set_xlabel("Количество процессов")
     axes[2].set_ylabel("Эффективность")
@@ -300,7 +307,7 @@ def first_task(args):
 def second_task(args):
     row_sizes = [10, 100, 1000]
     column_sizes = [10, 100000]
-    filenames = ['second_rows.c', 'second_columns.c']
+    filenames = ['second_blocks.c', 'second_rows.c', 'second_columns.c']
     executable_filenames = []
     
     for filename in filenames:
@@ -315,7 +322,9 @@ def second_task(args):
                     for column_size in column_sizes:
                         cur_string = ""
                         times_sum = 0.0
-                        for _ in range(args.retries):
+                        i = 0
+                        while i < args.retries:
+                            i += 1
                             # Execute + measure time
                             result = subprocess.run(
                                 [
@@ -330,13 +339,21 @@ def second_task(args):
                                 text=True,
                             )
                             stdout = result.stdout
+                            if 'Incorrect' in stdout:
+                                break
                             time_string = stdout[stdout.find("|") + 1 : stdout.rfind("|")]
-                            print(time_string)
                             cur_string = time_string[: time_string.rfind(",")]
-                            times_sum += float(time_string.split(",")[-1])
+                            try:
+                                times_sum += float(time_string.split(",")[-1])
+                            except:
+                                i -= 1
+                                continue
 
+                            print(time_string)
                             time.sleep(0.1)
 
+                        if len(cur_string) == 0:
+                            continue
                         cur_string = f"{algorithm},{threads},{cur_string},{str(times_sum / args.retries)}"
                         print("final: ", cur_string)
                         print(cur_string, file=f)
